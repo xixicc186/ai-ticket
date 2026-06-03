@@ -28,6 +28,12 @@ import json, sys, os, math, subprocess, datetime, shutil
 def project_home():
     return os.path.expanduser(os.environ.get("AI_TICKET_HOME", "~/.claude/ai-tickets"))
 
+CLAUDE_MD = os.path.expanduser(os.environ.get("AI_TICKET_CLAUDE_MD", "~/.claude/CLAUDE.md"))
+CONSOLIDATE_AT = 12   # 罚单达到此数量时，提醒做一次经验提炼
+MAX_EXP_LINES = 8     # 写进 CLAUDE.md 的教训最多几条，防止撑爆上下文
+BLOCK_BEGIN = "<!-- AI-TICKET-LESSONS:BEGIN (由 ai-ticket skill 自动维护，勿手改本块) -->"
+BLOCK_END = "<!-- AI-TICKET-LESSONS:END -->"
+
 PAGE_BG = "#fcfcfa"
 INK = "#111"
 SEAL_RED = "#c0271e"
@@ -215,6 +221,51 @@ def update_casefile(home, record):
     with open(os.path.join(home, "case-file.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md) + "\n")
 
+# ---------- 经验沉淀：写进全局 CLAUDE.md（会话自动加载）----------
+def experience_lines(data):
+    """优先用 agent 提炼过的 curated_lessons；否则按违规类型自动聚合（封顶，防膨胀）。"""
+    curated = data.get("curated_lessons")
+    if curated:
+        return [f"- {str(x).strip()}" for x in curated[:MAX_EXP_LINES]]
+    items = sorted(data.get("lessons", {}).items(), key=lambda kv: -kv[1]["count"])
+    lines = []
+    for vt, info in items[:MAX_EXP_LINES]:
+        rect = (info["rectifications"] or [""])[-1]
+        if len(rect) > 42:
+            rect = rect[:40] + "…"
+        lines.append(f"- {vt} ×{info['count']}：{rect}")
+    return lines
+
+def update_claude_md(home):
+    """把精炼后的历史教训写进 CLAUDE.md 的受管区块——这样每次新会话自动加载，开工前就看得到。"""
+    cf = os.path.join(home, "case-file.json")
+    if not os.path.exists(cf):
+        return
+    with open(cf, encoding="utf-8") as fh:
+        data = json.load(fh)
+    lines = experience_lines(data)
+    if not lines:
+        return
+    total = len(data.get("tickets", []))
+    block = (f"{BLOCK_BEGIN}\n"
+             f"## AI 罚单 · 历史教训（开工前过一眼，避免重犯同样的错）\n"
+             f"_累计 {total} 张罚单，以下是高频/已提炼的教训：_\n"
+             + "\n".join(lines) + "\n"
+             f"{BLOCK_END}")
+    existing = ""
+    if os.path.exists(CLAUDE_MD):
+        with open(CLAUDE_MD, encoding="utf-8") as fh:
+            existing = fh.read()
+    if BLOCK_BEGIN in existing and BLOCK_END in existing:
+        pre = existing.split(BLOCK_BEGIN)[0].rstrip("\n")
+        post = existing.split(BLOCK_END, 1)[1].lstrip("\n")
+        new = (pre + ("\n\n" if pre else "") + block + ("\n\n" + post if post else "\n"))
+    else:
+        new = (existing.rstrip("\n") + "\n\n" + block + "\n") if existing.strip() else block + "\n"
+    os.makedirs(os.path.dirname(CLAUDE_MD), exist_ok=True)
+    with open(CLAUDE_MD, "w", encoding="utf-8") as fh:
+        fh.write(new)
+
 # ---------- 主流程 ----------
 def next_id(home, date_str):
     tdir = os.path.join(home, "tickets")
@@ -227,6 +278,13 @@ def next_id(home, date_str):
 def main():
     if len(sys.argv) < 2:
         print(__doc__); sys.exit(1)
+
+    # --refresh：不开新单，只按当前 case-file（含 agent 提炼的 curated_lessons）重建 CLAUDE.md 教训块
+    if sys.argv[1] == "--refresh":
+        update_claude_md(project_home())
+        print(f"✅ 已按案底刷新 {CLAUDE_MD} 的教训块")
+        return
+
     with open(sys.argv[1], encoding="utf-8") as fh:
         f = json.load(fh)
 
@@ -265,10 +323,19 @@ def main():
         print("⚠️  未找到 rsvg-convert，跳过 PNG（svg 已生成）。安装：brew install librsvg")
 
     update_casefile(home, record)
+    update_claude_md(home)   # 同步把高频教训写进 CLAUDE.md，下次会话自动加载
     print(f"✅ 罚单 {f['id']} 已生成")
     print(f"   图片(给用户看): {png_path}")
     print(f"   数据(给agent读): {os.path.join(tdir,'ticket.json')}")
     print(f"   案底库: {os.path.join(home,'case-file.json')}  (-{f['penalty_token']} token)")
+    print(f"   教训已同步进: {CLAUDE_MD}")
+
+    with open(os.path.join(home, "case-file.json"), encoding="utf-8") as fh:
+        total = len(json.load(fh).get("tickets", []))
+    if total >= CONSOLIDATE_AT:
+        print(f"\n⚠️  罚单已达 {total} 张。建议做一次【经验提炼】（见 SKILL.md）：")
+        print(f"   读 case-file.json，把教训合并/精简成 ≤{MAX_EXP_LINES} 条写进 curated_lessons，")
+        print(f"   再跑 `python3 {os.path.abspath(__file__)} --refresh`，让上下文保持精简、教训保持高质量。")
 
 if __name__ == "__main__":
     main()

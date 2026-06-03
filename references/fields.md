@@ -52,6 +52,22 @@
 `lessons` 是吸取经验的核心：开工前看一眼哪类错误高频、之前承诺过怎么改，避免重蹈覆辙。
 若某类 `count` 持续增长，说明整改没落实，应在新罚单里升级整改措施（甚至单独标注"鬼打墙罪"）。
 
+### `curated_lessons`（agent 提炼的经验，可选）
+
+case-file.json 顶层可加一个 `"curated_lessons": ["经验1", "经验2", ...]` 字符串数组。
+一旦存在，写进 CLAUDE.md 的教训块就**优先用它**（而非机器对 `lessons` 的粗聚合）。
+这是"罚单太多时做提炼、保持上下文精简且高质量"的落点，详见 SKILL.md「上下文管理」。
+
+## 经验自动注入 CLAUDE.md
+
+每次开单（及 `--refresh`）都会把教训写进全局 `~/.claude/CLAUDE.md` 的受管区块
+（`<!-- AI-TICKET-LESSONS:BEGIN ... END -->`，就地替换、不堆叠、最多 8 条）。
+CLAUDE.md 每次新会话自动加载，于是教训在开工前就进入上下文——这是"以后避免重犯"真正生效的机制。
+
+- 改 CLAUDE.md 路径：环境变量 `AI_TICKET_CLAUDE_MD`（默认 `~/.claude/CLAUDE.md`）。
+- 仅重建教训块、不开新单：`python3 scripts/make_ticket.py --refresh`。
+- 调阈值/封顶：脚本顶部 `CONSOLIDATE_AT`（默认 12）、`MAX_EXP_LINES`（默认 8）。
+
 ## 渲染
 
 PNG 由 `rsvg-convert` 渲染（`brew install librsvg`）。

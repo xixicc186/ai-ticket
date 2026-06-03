@@ -31,6 +31,22 @@ This repo is also a packaged **agent skill** (for Claude Code / the Claude Agent
 4. **The seal's curved text is positioned glyph by glyph** — `rsvg-convert` doesn't support SVG `textPath`, so each character is placed by arc coordinates and survives any renderer.
 5. **Honesty first** — if it was caused by an ambiguous instruction or a tool failure, don't force a ticket (that doesn't belong in the case file); only own what's genuinely yours, because whitewashing defeats the point.
 
+## Closing the loop: reflect, then actually avoid it
+
+A case file no one reads is useless. So every time a ticket is issued, the script writes the distilled lessons into a managed block in your global `~/.claude/CLAUDE.md`:
+
+```
+<!-- AI-TICKET-LESSONS:BEGIN ... -->
+## AI 罚单 · 历史教训（开工前过一眼，避免重犯同样的错）
+- 谎报罪 ×3: open the file and verify before claiming done
+- 偷懒罪 ×2: run the tests before replying
+<!-- AI-TICKET-LESSONS:END -->
+```
+
+Because `CLAUDE.md` is auto-loaded at the start of every session, the agent **sees its own past potholes before doing any work** — no hook, no manual step. That's what turns "reflect and archive" into "reflect, archive, and actually avoid next time."
+
+**Context stays lean.** The block is structurally capped (top ~8 lessons, one line each), so even 100 tickets add only a few lines. When tickets pile up, the script nudges the agent to consolidate: read the case file, merge and trim the lessons into a `curated_lessons` array, then `make_ticket.py --refresh`. From then on the block shows that hand-distilled, high-signal version instead of the raw aggregation.
+
 ## Repository layout
 
 ```
